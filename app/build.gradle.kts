@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    implementation("androidx.core:core-ktx:1.15.0")
 }
 
 android {

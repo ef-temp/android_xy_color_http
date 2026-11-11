@@ -14,3 +14,11 @@ built `app-debug.apk` attached. Create and push a tag with:
 git tag v1.0.0
 git push origin v1.0.0
 ```
+
+## Screen monitoring service
+
+Screen monitoring runs as a `mediaProjection` foreground service and displays
+an ongoing notification while active. Android requires fresh user approval for
+each screen-capture session, so the service intentionally does not use
+`START_STICKY`: after the system stops it, monitoring must be started again
+from the app and approved by the user.

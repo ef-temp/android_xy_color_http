@@ -22,6 +22,7 @@ import android.os.IBinder
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
+import androidx.core.app.ServiceCompat
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ExecutorService
@@ -69,6 +70,7 @@ class ScreenColorMonitorService : Service() {
         targetX = intent.getIntExtra(EXTRA_X, 0)
         targetY = intent.getIntExtra(EXTRA_Y, 0)
         startCapture(resultCode, resultData)
+        // MediaProjection grants are session-bound and cannot be reused after a service restart.
         return START_NOT_STICKY
     }
 
@@ -259,15 +261,12 @@ class ScreenColorMonitorService : Service() {
 
     private fun startAsForeground() {
         val notification = buildNotification("正在启动屏幕监测")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        )
     }
 
     private fun updateNotification(message: String) {
