@@ -55,7 +55,7 @@ class MainActivity : Activity() {
         }
 
         content.addView(TextView(this).apply {
-            text = "监测屏幕指定坐标的颜色。检测到 RGB(255, 0, 0) 时，向\n" +
+            text = "监测屏幕指定坐标的颜色，并且每 12 秒（无论颜色条件是否成立）向\n" +
                 ScreenColorMonitorService.POST_URL + "\n发送一次 HTTP POST。"
             textSize = 16f
         }, matchWidthWrapHeight())

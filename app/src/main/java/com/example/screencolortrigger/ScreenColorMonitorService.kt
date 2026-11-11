@@ -34,6 +34,12 @@ class ScreenColorMonitorService : Service() {
     private var imageThread: HandlerThread? = null
     private var imageHandler: Handler? = null
     private val networkExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val periodicPost = object : Runnable {
+        override fun run() {
+            sendPostRequest()
+            imageHandler?.postDelayed(this, POST_INTERVAL_MILLIS)
+        }
+    }
     private var targetX = 0
     private var targetY = 0
     private var redWasPresent = false
@@ -125,7 +131,8 @@ class ScreenColorMonitorService : Service() {
             stopSelf()
             return
         }
-        updateNotification("监测坐标 ($targetX, $targetY)")
+        updateNotification("监测坐标 ($targetX, $targetY)，每 12 秒发送一次 POST")
+        imageHandler?.postDelayed(periodicPost, POST_INTERVAL_MILLIS)
     }
 
     private fun inspectLatestImage(reader: ImageReader) {
@@ -150,8 +157,7 @@ class ScreenColorMonitorService : Service() {
 
             if (isRed && !redWasPresent) {
                 redWasPresent = true
-                updateNotification("检测到红色，正在发送请求")
-                sendPostRequest()
+                updateNotification("检测到红色，POST 仍按固定间隔发送")
             } else if (!isRed) {
                 redWasPresent = false
             }
@@ -272,6 +278,7 @@ class ScreenColorMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        imageHandler?.removeCallbacks(periodicPost)
         imageReader?.setOnImageAvailableListener(null, null)
         virtualDisplay?.release()
         imageReader?.close()
@@ -296,6 +303,7 @@ class ScreenColorMonitorService : Service() {
         const val EXTRA_X = "target_x"
         const val EXTRA_Y = "target_y"
 
+        private const val POST_INTERVAL_MILLIS = 12_000L
         private const val ACTION_STOP = "com.example.screencolortrigger.STOP"
         private const val CHANNEL_ID = "screen_color_monitor"
         private const val NOTIFICATION_ID = 1001
