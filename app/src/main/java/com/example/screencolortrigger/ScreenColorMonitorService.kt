@@ -40,6 +40,8 @@ class ScreenColorMonitorService : Service() {
             imageHandler?.postDelayed(this, POST_INTERVAL_MILLIS)
         }
     }
+    @Volatile
+    private var latestRgb: Rgb? = null
     private var targetX = 0
     private var targetY = 0
     private var redWasPresent = false
@@ -146,15 +148,17 @@ class ScreenColorMonitorService : Service() {
         } ?: return
 
         image.use {
-            val isRed = try {
-                isTargetPixelRed(it, targetX, targetY)
+            val rgb = try {
+                readTargetPixel(it, targetX, targetY)
             } catch (error: IllegalArgumentException) {
                 Log.e(TAG, "Unable to read target pixel", error)
                 updateNotification("读取目标像素失败")
                 stopSelf()
-                false
-            }
+                null
+            } ?: return
 
+            latestRgb = rgb
+            val isRed = rgb.red == 255 && rgb.green == 0 && rgb.blue == 0
             if (isRed && !redWasPresent) {
                 redWasPresent = true
                 updateNotification("检测到红色，POST 仍按固定间隔发送")
@@ -164,7 +168,7 @@ class ScreenColorMonitorService : Service() {
         }
     }
 
-    private fun isTargetPixelRed(image: Image, x: Int, y: Int): Boolean {
+    private fun readTargetPixel(image: Image, x: Int, y: Int): Rgb {
         val crop = image.cropRect
         require(x >= crop.left && x < crop.right && y >= crop.top && y < crop.bottom) {
             "Target coordinate is outside the captured image"
@@ -180,10 +184,11 @@ class ScreenColorMonitorService : Service() {
         val red = buffer.get(pixelOffset).toInt() and 0xFF
         val green = buffer.get(pixelOffset + 1).toInt() and 0xFF
         val blue = buffer.get(pixelOffset + 2).toInt() and 0xFF
-        return red == 255 && green == 0 && blue == 0
+        return Rgb(red, green, blue)
     }
 
     private fun sendPostRequest() {
+        val rgb = latestRgb
         networkExecutor.execute {
             val connection = try {
                 (URL(POST_URL).openConnection() as HttpURLConnection).apply {
@@ -196,6 +201,7 @@ class ScreenColorMonitorService : Service() {
             } catch (error: Exception) {
                 Log.e(TAG, "Unable to create POST request", error)
                 updateNotification("创建 HTTP 请求失败")
+                publishPostResult(rgb, "请求创建失败")
                 return@execute
             }
 
@@ -205,18 +211,50 @@ class ScreenColorMonitorService : Service() {
                 if (responseCode in 200..299) {
                     connection.inputStream?.close()
                     updateNotification("请求成功 (HTTP $responseCode)")
+                    publishPostResult(rgb, "HTTP $responseCode")
                 } else {
                     connection.errorStream?.close()
                     Log.e(TAG, "POST request failed with HTTP $responseCode")
                     updateNotification("请求失败 (HTTP $responseCode)")
+                    publishPostResult(rgb, "HTTP $responseCode")
                 }
             } catch (error: Exception) {
                 Log.e(TAG, "POST request failed", error)
                 updateNotification("请求失败：${error.localizedMessage ?: "网络错误"}")
+                publishPostResult(rgb, "请求失败")
             } finally {
                 connection.disconnect()
             }
         }
+    }
+
+    private fun publishPostResult(rgb: Rgb?, status: String) {
+        getSharedPreferences(PREFERENCES_NAME, MODE_PRIVATE).edit()
+            .putInt(KEY_X, targetX)
+            .putInt(KEY_Y, targetY)
+            .putBoolean(KEY_HAS_RGB, rgb != null)
+            .putString(KEY_STATUS, status)
+            .apply {
+                if (rgb != null) {
+                    putInt(KEY_RED, rgb.red)
+                    putInt(KEY_GREEN, rgb.green)
+                    putInt(KEY_BLUE, rgb.blue)
+                }
+            }
+            .apply()
+
+        sendBroadcast(Intent(ACTION_POST_COMPLETED).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_POST_X, targetX)
+            putExtra(EXTRA_POST_Y, targetY)
+            putExtra(EXTRA_POST_HAS_RGB, rgb != null)
+            putExtra(EXTRA_POST_STATUS, status)
+            if (rgb != null) {
+                putExtra(EXTRA_POST_RED, rgb.red)
+                putExtra(EXTRA_POST_GREEN, rgb.green)
+                putExtra(EXTRA_POST_BLUE, rgb.blue)
+            }
+        })
     }
 
     private fun startAsForeground() {
@@ -298,6 +336,23 @@ class ScreenColorMonitorService : Service() {
 
     companion object {
         const val POST_URL = "http://192.168.100.10/api/touch_event_sequence_1"
+        const val ACTION_POST_COMPLETED =
+            "com.example.screencolortrigger.POST_COMPLETED"
+        const val PREFERENCES_NAME = "screen_color_monitor"
+        const val KEY_X = "post_x"
+        const val KEY_Y = "post_y"
+        const val KEY_RED = "post_red"
+        const val KEY_GREEN = "post_green"
+        const val KEY_BLUE = "post_blue"
+        const val KEY_HAS_RGB = "post_has_rgb"
+        const val KEY_STATUS = "post_status"
+        const val EXTRA_POST_X = "post_x"
+        const val EXTRA_POST_Y = "post_y"
+        const val EXTRA_POST_RED = "post_red"
+        const val EXTRA_POST_GREEN = "post_green"
+        const val EXTRA_POST_BLUE = "post_blue"
+        const val EXTRA_POST_HAS_RGB = "post_has_rgb"
+        const val EXTRA_POST_STATUS = "post_status"
         const val EXTRA_RESULT_CODE = "capture_result_code"
         const val EXTRA_RESULT_DATA = "capture_result_data"
         const val EXTRA_X = "target_x"
@@ -309,4 +364,6 @@ class ScreenColorMonitorService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val TAG = "ScreenColorMonitor"
     }
+
+    private data class Rgb(val red: Int, val green: Int, val blue: Int)
 }

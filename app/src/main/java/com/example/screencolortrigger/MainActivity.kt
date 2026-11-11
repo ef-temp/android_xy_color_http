@@ -1,8 +1,10 @@
 package com.example.screencolortrigger
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -17,10 +19,46 @@ import android.widget.Toast
 class MainActivity : Activity() {
     private lateinit var xInput: EditText
     private lateinit var yInput: EditText
+    private lateinit var rgbStatus: TextView
+    private val postCompletedReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            showPostResult(
+                intent.getIntExtra(ScreenColorMonitorService.EXTRA_POST_X, 0),
+                intent.getIntExtra(ScreenColorMonitorService.EXTRA_POST_Y, 0),
+                intent.getIntExtra(ScreenColorMonitorService.EXTRA_POST_RED, 0),
+                intent.getIntExtra(ScreenColorMonitorService.EXTRA_POST_GREEN, 0),
+                intent.getIntExtra(ScreenColorMonitorService.EXTRA_POST_BLUE, 0),
+                intent.getBooleanExtra(ScreenColorMonitorService.EXTRA_POST_HAS_RGB, false),
+                intent.getStringExtra(ScreenColorMonitorService.EXTRA_POST_STATUS)
+            )
+        }
+    }
+    private var isPostReceiverRegistered = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildContentView()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(ScreenColorMonitorService.ACTION_POST_COMPLETED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(postCompletedReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(postCompletedReceiver, filter)
+        }
+        isPostReceiverRegistered = true
+        loadLastPostResult()
+    }
+
+    override fun onStop() {
+        if (isPostReceiverRegistered) {
+            unregisterReceiver(postCompletedReceiver)
+            isPostReceiverRegistered = false
+        }
+        super.onStop()
     }
 
     @Deprecated("Deprecated in Android")
@@ -60,6 +98,12 @@ class MainActivity : Activity() {
             textSize = 16f
         }, matchWidthWrapHeight())
 
+        rgbStatus = TextView(this).apply {
+            text = "发送 POST 后将在此显示坐标 RGB"
+            textSize = 16f
+        }
+        content.addView(rgbStatus, matchWidthWrapHeight())
+
         xInput = coordinateInput("X 坐标")
         yInput = coordinateInput("Y 坐标")
         content.addView(xInput, matchWidthWrapHeight())
@@ -79,6 +123,41 @@ class MainActivity : Activity() {
         }, matchWidthWrapHeight())
 
         setContentView(content)
+    }
+
+    private fun loadLastPostResult() {
+        val preferences = getSharedPreferences(
+            ScreenColorMonitorService.PREFERENCES_NAME,
+            Context.MODE_PRIVATE
+        )
+        val status = preferences.getString(ScreenColorMonitorService.KEY_STATUS, null)
+            ?: return
+        showPostResult(
+            preferences.getInt(ScreenColorMonitorService.KEY_X, 0),
+            preferences.getInt(ScreenColorMonitorService.KEY_Y, 0),
+            preferences.getInt(ScreenColorMonitorService.KEY_RED, 0),
+            preferences.getInt(ScreenColorMonitorService.KEY_GREEN, 0),
+            preferences.getInt(ScreenColorMonitorService.KEY_BLUE, 0),
+            preferences.getBoolean(ScreenColorMonitorService.KEY_HAS_RGB, false),
+            status
+        )
+    }
+
+    private fun showPostResult(
+        x: Int,
+        y: Int,
+        red: Int,
+        green: Int,
+        blue: Int,
+        hasRgb: Boolean,
+        status: String?
+    ) {
+        val colorText = if (hasRgb) {
+            "坐标 ($x, $y) RGB($red, $green, $blue)"
+        } else {
+            "坐标 ($x, $y) 暂无可用 RGB 采样"
+        }
+        rgbStatus.text = "最近一次 POST：$colorText\n结果：${status ?: "未知"}"
     }
 
     private fun coordinateInput(label: String) = EditText(this).apply {
